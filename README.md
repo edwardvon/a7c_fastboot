@@ -91,7 +91,7 @@ python tools\a7c_fb.py [--timeout 毫秒] <命令> [参数]
 | `dump <name> [off] [length] -o <file>` | 按分区导出数据 |
 | `upload <file>` | 把当前已就绪的数据流导出到文件 |
 | `armed` | 报告上一次导出停在哪里（用于区分「流被截断」与「读超时」） |
-| `darwin [args]` | 发送厂商诊断命令 `oem darwin` |
+| `darwin [args]` | 发送厂商诊断命令 `oem darwin`，兼作载荷存活/复位观测点（见下文） |
 | `reboot` | 请求设备结束当前会话并重新枚举 |
 | `selftest` | 不需要设备的自检，校验分片边界与握手 |
 
@@ -106,6 +106,18 @@ python tools\a7c_fb.py [--timeout 毫秒] <命令> [参数]
 - `flash-part` 按 16 KiB 分块，块序递增；某块失败即停止，之前的块已写入、之后的块未动。
 - 未知分区名、长度不是 512 的整数倍、超过分区大小，这三种情况都会在打开设备之前报错退出，不会向设备发送任何命令。
 - 写入后设备侧会立刻读回并逐字节比对，`OKAY` 表示读回内容与发送内容完全一致；`FAIL` 会附带 `w_n / w_err / v_bad / err` 便于定位。
+
+### `oem darwin` 与长期存活
+
+`oem darwin` 的用途不只是诊断：在「把设备留在 fastboot 下长期调试」这个场景里，它同时是**存活与复位的观测点**。
+
+- **只读**：它通过 SIO 通道读取 Darwin（系统电源 MCU）的 RAM，不写 MCU、不碰看门狗寄存器、不改 Backup 分区，因此不构成写入风险。
+- **实测现象**：设备停在服务模式、不执行任何命令时约 **245 s** 自动复位（SoC 侧硬件看门狗的静态分析值）；进入 fastboot 后执行过一次 `oem darwin` 的会话越过了同一时间点，之后持续在线，最长观测约 **50 分钟**，其间还有一段 605 s 零命令的纯空闲窗口仍存活。
+- **判读**：输出里的 `dw_seq` 是命令入口自增的静态计数器，且在**第一笔读之前**打印——递增说明载荷实例没重启（SoC 没复位），回到 `1` 说明载荷重启过，此前关于「存活时长」的结论作废；两行读回值不变说明 MCU 侧看门狗表还在、没被重配。
+- **不要当成喂狗**：「必须定期执行 `oem darwin` 保活」已被纯空闲观测证伪，单次执行之后没有周期性依赖。正确用法是：注入后建一次基线，之后只在怀疑复位时再跑一次。
+- **冷帧不算故障**：每次链路空闲后的第一笔交换必定失败、第二笔才成功，属 MCU 的应答节奏；`FAIL no reply from darwin (table)` 时先看 `dw_seq` 有没有打印出来，打印了说明载荷还活着、问题在 SIO 链路或引脚复用。
+
+实现细节、地址来源与全部实测数据见 [oem darwin 实现与效果](file:///e:/coding/sony/oem_darwin_实现与效果_20261027.md)。
 
 ## 常用示例
 
@@ -129,6 +141,9 @@ python tools\a7c_fb.py dump nflasha23 0 0x200000 -o out\nflasha23.bin --resume -
 
 # 原样写回（需要 -Write 构建的镜像）
 python tools\a7c_fb.py flash-part nflasha23 -f out\nflasha23.bin
+
+# 存活观测（只读，注入后建一次基线即可，不要定时跑）
+python tools\a7c_fb.py darwin
 
 # 不需要设备的自检
 python tools\a7c_fb.py selftest
@@ -168,6 +183,9 @@ python tools\sdm2_parse.py synth   <partinf.conf> --out <table.bin> [--magic 642
 ## 致谢
 
 - 特别感谢 **ILCE-7M4（7M4）相关开源项目**：本项目在设备侧 fastboot 服务的命令集与整体结构上，很大程度参考并对其做了移植与对齐，没有那份公开工作就不会有这里的起点。
+  - <https://github.com/DavidBuchanan314/ILCE-7M4-RE>
+- 感谢 **sony-a6700-powerful** 项目公开的思路与实现，为本项目提供了有价值的参考。
+  - <https://github.com/xyzhangxin/sony-a6700-powerful>
 - 感谢 Sony 相机研究社区长期公开分享的分析资料、工具与讨论，本项目的很多思路都来自这些公开资料的启发。
 - 感谢 Python 生态中的 `pyusb`、`libusb`，以及 Zadig 等驱动工具的作者与维护者，本项目的主机端交互与设备驱动绑定直接受益于它们。
 - 感谢 `arm-none-eabi-gcc` / GNU 工具链的维护者，以及所有把裸机开发经验写成公开文档的人。
