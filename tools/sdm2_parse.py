@@ -150,7 +150,7 @@ def parse_partinf(path):
 # ---- raw table ------------------------------------------------------------
 
 def parse_raw(data):
-    """Mirror of part_parse() in src/part.c."""
+    """Mirror of part_parse() in payload/src/part.c."""
     if len(data) < 32:
         raise SystemExit('raw dump is %d bytes, need at least 32' % len(data))
     magic = data[0:4]
@@ -216,8 +216,9 @@ def emit_log(table):
     """Render exactly what `oem partition` prints, tag stripped.
 
     Byte-identical to the header + part_line() of cmd_partition() in
-    src/fastboot.c (lower-case hex, 11-char name field).  The payload also
-    emits `step=`/`err=` lines; parse_log() ignores them, so they are omitted.
+    payload/src/fastboot.c (lower-case hex, 11-char name field).  The payload
+    also emits `step=`/`err=` lines; parse_log() ignores them, so they are
+    omitted.
 
     The header magic goes out as magic_hex(), because fastboot.c prints
     `t->magic` -- the LE32 value -- not the four characters.

@@ -1,175 +1,96 @@
 # a7c_fastboot
 
-面向 Sony ILCE-7C（A7C）的一套最小 fastboot 实现，包含设备侧固件源码与配套的主机端命令行工具。
+面向 Sony ILCE-7C（A7C）的一套最小 fastboot 实现，包含设备侧固件源码、载荷注入链路与配套的主机端命令行工具。
 
-设备侧提供一个 USB fastboot 协议服务：查询版本/产品名，只读访问寄存器与分区表，按分区导出数据，以及在专门的测试构建下把数据原样写回分区。主机侧负责发现设备、发送命令、把数据落盘并做校验。
+设备侧提供一个 USB fastboot 协议服务：查询版本/产品名，只读访问寄存器与分区表，按分区导出数据，以及在专门的测试构建下把数据原样写回分区。设备启动前，镜像经一块 RP2040 桥接板按 BootROM 的串行启动协议推入并跳转；主机侧负责发现设备、发送命令、把数据落盘并做校验。
 
-> 本文档只描述各文件的作用与命令用法。
+> 本文件是总览与导航。各子项目按实际动手顺序拆分：搭注入链路 → 构建载荷 → 注入 → 用主机工具。
 
 ## 目录结构
 
 ```
 a7c_fastboot/
-├─ build.ps1              构建脚本
-├─ payload.ld             链接脚本
-├─ include/               头文件
-├─ src/                   设备侧源码
-└─ tools/                 主机端 Python 工具
+├─ rp2040/                注入链路（RP2040 侧）
+│  ├─ README.md           接线、构建、烧录、自检
+│  └─ firmware/           UART 桥接固件：.ino / .pio / .pio.h / Makefile
+├─ payload/               fastboot 载荷（设备侧）
+│  ├─ README.md           构建、镜像格式、源码地图
+│  ├─ build.ps1           构建脚本
+│  ├─ payload.ld          链接脚本
+│  ├─ include/            头文件
+│  └─ src/                设备侧源码
+├─ tools/                 主机端工具：注入 + fastboot 交互
+│  └─ README.md           载荷注入、fastboot 命令、分区导出、`oem darwin`
+└─ out/                   构建产物与导出数据（git 忽略）
 ```
 
-### 设备侧
-
-| 文件 | 作用 |
-|---|---|
-| `src/start.S` | 入口与栈/段初始化 |
-| `src/main.c` | 主流程：外设初始化、命令循环、灯码 |
-| `src/usb_phy.c` | USB PHY 配置 |
-| `src/dwc3.c` | USB 控制器驱动（设备模式、端点、传输） |
-| `src/usb.c` | USB 描述符、控制传输与 bulk 收发 |
-| `src/fastboot.c` | fastboot 命令解析与响应（`getvar` / `oem *` / `download` / `flash` / `upload` 等） |
-| `src/storage.c` | 存储侧读通路（CMD17）与写入通路（CMD24，默认关闭） |
-| `src/part.c` | SDM2 分区表解析 |
-| `src/darwin.c` | 厂商诊断命令 `oem darwin` |
-| `src/timer.c` | 时基与延时 |
-| `src/led.c` | 灯码输出 |
-| `src/a3.c` | 镜像头部校验 |
-| `src/libc.c` | 最小 libc 替代（字符串/内存） |
-| `include/*.h` | 对应的头文件与寄存器定义 |
-| `payload.ld` | 链接布局 |
-
-### 主机侧
-
-| 文件 | 作用 |
-|---|---|
-| `tools/a7c_fb.py` | 主机端命令行工具，本文档的主要对象 |
-| `tools/sdm2_parse.py` | 分区表解析与比对（`parse` / `compare`） |
-| `tools/a3image.py` | 把 flat 二进制包装为 `.a3` 镜像，并做自校验 |
+- [rp2040/README.md](rp2040/README.md)：桥接板接线（1.1）、固件构成（1.2）、构建烧录（1.3）、固件自检（1.4）
+- [payload/README.md](payload/README.md)：构建命令与产物（2.1）、镜像格式（2.2）、源码地图（2.3）
+- [tools/README.md](tools/README.md)：载荷注入（3）、fastboot 主机工具（4）
 
 ## 环境要求
 
+### 载荷构建
+
 - Windows + PowerShell 5.1
-- ARM 交叉工具链 `arm-none-eabi-gcc`（`build.ps1` 顶部的 `$tc` 指向工具链 `bin` 目录，按本机位置修改）
+- ARM 交叉工具链 `arm-none-eabi-gcc`（[payload/build.ps1](payload/build.ps1) 顶部的 `$tc` 指向工具链 `bin` 目录，按本机位置修改）
+
+### 载荷注入
+
+- 一块 RP2040 桥接板，按 [§1.1](rp2040/README.md#11-硬件与接线) 接线
+- `make` + `arduino-cli`（仅烧写桥接固件时需要）
+- `pyserial`（`a3push.py` 与 `host_control.py` 都依赖它，只打印计划时也需要）
+  ```powershell
+  pip install pyserial
+  ```
+
+### 主机工具
+
 - Python 3.8+，`pyusb`
   ```powershell
   pip install pyusb
   ```
 - 设备在系统里需绑定 WinUSB 或 libusbK（可用 Zadig 完成）
 
-## 构建
+## 快速开始
+
+四步跑通整条链路（都在仓库根执行），细节见对应文档。
 
 ```powershell
-.\build.ps1              # 常规构建 -> out\payload.a3
-.\build.ps1 -Clean       # 先清空 out\ 再构建
-.\build.ps1 -Selftest    # 只做镜像自校验的最小构建 -> out\selftest.a3
-.\build.ps1 -Write       # 带写入通路的测试构建 -> out\payload_w.a3
+# 1. 烧写桥接固件（仅首次）
+cd rp2040\firmware; make setup; make flash PORT=COM4; cd ..\..   # rp2040 §1.3
+
+# 2. 构建载荷
+.\payload\build.ps1                               # -> out\payload.a3，payload §2.1
+
+# 3. 注入：相机断电，执行后给相机上电
+python tools\a3push.py out\payload.a3 --send --cold --expect 18d1:4ee0   # tools §3.3
+
+# 4. 验证载荷是否在跑
+python tools\a7c_fb.py info                       # tools §4.2
 ```
 
-产物都在 `out\` 下：`<name>.a3`（可分发镜像）、`<name>.bin`（flat 镜像）、`<name>.elf` / `.map` / `.dis`（调试用）。
+前提：桥接板已按 [rp2040 §1.1](rp2040/README.md#11-硬件与接线) 接线，相机 USB 已绑定 WinUSB/libusbK（见"环境要求"）。
 
-- flat 镜像上限 64 KiB，超出会直接构建失败。
-- `-Write` 不是默认构建，产物名固定为 `payload_w.a3`，永远不会覆盖 `payload.a3`。
-- 另有若干诊断用构建开关，见 `build.ps1` 头部注释。
+## 常见问题
 
-## 主机工具 `tools/a7c_fb.py`
-
-```powershell
-python tools\a7c_fb.py [--timeout 毫秒] <命令> [参数]
-```
-
-`--timeout` 为单条命令的 USB 超时，默认值按命令自动选取。
-
-### 只读命令
-
-| 命令 | 作用 |
+| 现象 | 处理 |
 |---|---|
-| `devices` | 只列举 `18d1:4ee0`，不打开设备 |
-| `info` | 打印 version / product / serialno / max-download-size |
-| `getvar <name>` | 读取一个 fastboot 变量 |
-| `peek <addr[:len]>...` | 只读访问寄存器/内存，多个地址在同一会话内完成 |
-| `storage` | 读取存储设备标识信息 |
-| `partition` | 读取并打印 SDM2 分区表（每槽一行） |
-| `dump <name> [off] [length] -o <file>` | 按分区导出数据 |
-| `upload <file>` | 把当前已就绪的数据流导出到文件 |
-| `armed` | 报告上一次导出停在哪里（用于区分「流被截断」与「读超时」） |
-| `darwin [args]` | 发送厂商诊断命令 `oem darwin`，兼作载荷存活/复位观测点（见下文） |
-| `reboot` | 请求设备结束当前会话并重新枚举 |
-| `selftest` | 不需要设备的自检，校验分片边界与握手 |
-
-### 写命令（仅对 `-Write` 构建可用）
-
-| 命令 | 作用 |
-|---|---|
-| `flash <zone> -f <file>` | 把单个扇区写到白名单分区 |
-| `flash-part <zone> -f <file>` | 把整个分区分块写回，仅允许整分区 |
-
-- 白名单与分区大小定义在 `src/fastboot.c` 的 `write_zones[]`；主机侧 `ZONE_BYTES` 必须与之手工对齐。
-- `flash-part` 按 16 KiB 分块，块序递增；某块失败即停止，之前的块已写入、之后的块未动。
-- 未知分区名、长度不是 512 的整数倍、超过分区大小，这三种情况都会在打开设备之前报错退出，不会向设备发送任何命令。
-- 写入后设备侧会立刻读回并逐字节比对，`OKAY` 表示读回内容与发送内容完全一致；`FAIL` 会附带 `w_n / w_err / v_bad / err` 便于定位。
-
-### `oem darwin` 与长期存活
-
-`oem darwin` 的用途不只是诊断：在「把设备留在 fastboot 下长期调试」这个场景里，它同时是**存活与复位的观测点**。
-
-- **只读**：它通过 SIO 通道读取 Darwin（系统电源 MCU）的 RAM，不写 MCU、不碰看门狗寄存器、不改 Backup 分区，因此不构成写入风险。
-- **实测现象**：设备停在服务模式、不执行任何命令时约 **245 s** 自动复位（SoC 侧硬件看门狗的静态分析值）；进入 fastboot 后执行过一次 `oem darwin` 的会话越过了同一时间点，之后持续在线，最长观测约 **50 分钟**，其间还有一段 605 s 零命令的纯空闲窗口仍存活。
-- **判读**：输出里的 `dw_seq` 是命令入口自增的静态计数器，且在**第一笔读之前**打印——递增说明载荷实例没重启（SoC 没复位），回到 `1` 说明载荷重启过，此前关于「存活时长」的结论作废；两行读回值不变说明 MCU 侧看门狗表还在、没被重配。
-- **不要当成喂狗**：「必须定期执行 `oem darwin` 保活」已被纯空闲观测证伪，单次执行之后没有周期性依赖。正确用法是：注入后建一次基线，之后只在怀疑复位时再跑一次。
-- **冷帧不算故障**：每次链路空闲后的第一笔交换必定失败、第二笔才成功，属 MCU 的应答节奏；`FAIL no reply from darwin (table)` 时先看 `dw_seq` 有没有打印出来，打印了说明载荷还活着、问题在 SIO 链路或引脚复用。
-
-实现细节、地址来源与全部实测数据见 [oem darwin 实现与效果](file:///e:/coding/sony/oem_darwin_实现与效果_20261027.md)。
-
-## 常用示例
-
-```powershell
-# 发现设备与基本信息
-python tools\a7c_fb.py devices
-python tools\a7c_fb.py info
-python tools\a7c_fb.py getvar product
-
-# 分区表
-python tools\a7c_fb.py partition
-python tools\a7c_fb.py partition > out\parts.txt
-python tools\sdm2_parse.py compare <partinf.conf> --log out\parts.txt
-
-# 导出 2 MiB 分区并校验
-python tools\a7c_fb.py dump nflasha23 0 0x200000 -o out\nflasha23.bin
-Get-FileHash out\nflasha23.bin -Algorithm SHA256
-
-# 中断后续传
-python tools\a7c_fb.py dump nflasha23 0 0x200000 -o out\nflasha23.bin --resume --retries 5
-
-# 原样写回（需要 -Write 构建的镜像）
-python tools\a7c_fb.py flash-part nflasha23 -f out\nflasha23.bin
-
-# 存活观测（只读，注入后建一次基线即可，不要定时跑）
-python tools\a7c_fb.py darwin
-
-# 不需要设备的自检
-python tools\a7c_fb.py selftest
-```
-
-## `tools/sdm2_parse.py`
-
-```powershell
-python tools\sdm2_parse.py expected <partinf.conf> [--csv <file>]
-python tools\sdm2_parse.py capture (--raw <dump.bin> | --log <partition.txt>) [--csv <file>]
-python tools\sdm2_parse.py compare <partinf.conf> (--raw <dump.bin> | --log <partition.txt>)
-python tools\sdm2_parse.py synth   <partinf.conf> --out <table.bin> [--magic 6428|8246]
-```
-
-- `expected`：把分区清单 `partinf.conf` 展开成期望表。
-- `capture`：把原始表镜像（`--raw`）或 `a7c_fb.py partition` 的重定向文本（`--log`）解析成表。
-- `compare`：期望表与实测表逐项比对，输出 `MATCH` / `MISMATCH`，并对魔术数写法等无害差异降级为 `note:`。
-- `synth`：按清单生成一张合成的 2048 字节表镜像，用于离线自测。
+| `devices` 能列出，`open()` 报错 | 驱动未绑定到 WinUSB/libusbK，用 Zadig 重新绑定 |
+| `dump` 中途设备消失 | 加 `--resume --retries N` 续传，用 `armed` 判断是流被截断还是读超时（[tools §4.3](tools/README.md#43-分区导出与续传)） |
+| 注入后相机正常启动、没有枚举 | 波形错过了上电窗口，重试；先用 `--probe` 确认 ROM 当时在解析记录（[tools §3.3](tools/README.md#33-常用命令)） |
+| `--cold` 直接中止，提示基线为高 | 相机已上电或采样线被拉高；断电、断开测试板后重试 |
+| `darwin` 返回 `FAIL no reply from darwin (table)` | 看 `dw_seq` 是否已打印：已打印说明载荷还活着，问题在 SIO 链路；链路静默时复位设备即可恢复（[tools §4.5](tools/README.md#45-oem-darwin-与长期存活)） |
+| `ModuleNotFoundError: No module named 'serial'` | `pip install pyserial` |
+| `-o` 指定的路径被拒绝 | 导出/读入文件必须落在仓库目录内（如 `out\`） |
+| 写命令被直接拒绝 | 当前镜像不是 `-Write` 构建（[payload §2.1](payload/README.md#21-构建命令与产物)） |
 
 ## 约定与限制
 
-- `dump` 每次传输 16 KiB，`--slice` 请保持 ≤ 16384；更长的切片不可靠。
-- 导出文件必须落在本工具目录内，`-o` 传目录外的路径会被拒绝。
-- 设备打开失败（`open()` 报错但 `devices` 能列出）通常是驱动未绑定到 WinUSB/libusbK。
-- 设备在传输异常后可能短暂断开再重新出现，`dump` 自带重试与续传；`--retry-wait` 控制重连等待秒数。
-- 写命令只在本仓库的 `-Write` 测试构建下存在，常规构建会直接拒绝。
+- 只针对 ILCE-7C（`18d1:4ee0`）：其他机型的分区表、寄存器与 GPIO/SIO 参数都不同，不能直接套用。
+- 写命令只存在于 `-Write` 测试构建（[payload §2.1](payload/README.md#21-构建命令与产物)），常规构建一律拒绝。
+- 导出/读入的文件必须落在仓库目录内（如 `out\`），`-o`/`-f` 传仓库外的路径会被拒绝。
+- `--slice` 上限、断线重试与续传行为见 [tools §4.3](tools/README.md#43-分区导出与续传)；导出后请自行校验（如 `Get-FileHash`），不要只看命令是否返回 `OKAY`。
 
 ## 免责声明
 
@@ -193,4 +114,4 @@ python tools\sdm2_parse.py synth   <partinf.conf> --out <table.bin> [--magic 642
 
 ## 范围说明
 
-本仓库只覆盖设备侧 fastboot 服务的实现与主机端交互工具。如何把构建产物交给设备运行不在本文档范围内。
+本仓库覆盖设备侧 fastboot 服务、主机端交互工具、载荷注入脚本与 RP2040 桥接固件源码。注入需要自备 RP2040 板并按 [rp2040 §1.1](rp2040/README.md#11-硬件与接线) 接线；桥接板的选型、焊接与供电不在本文档范围内。

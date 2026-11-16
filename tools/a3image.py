@@ -2,11 +2,11 @@
 """Wrap a flat ARM payload in the 32-byte A3 container.
 
 The loader expects the header at offset 0 and the first instruction at
-offset 64 (see payload.ld's ASSERT and src/a3.c's a3_verify): the 32 bytes
-behind the header are a guard, because the BootROM hands over with the SP of
-its own loader and a push below the entry point would otherwise overwrite the
-header CRC word at +0x1c. Both CRCs use zlib's polynomial, which is what the
-on-target bitwise implementation computes.
+offset 64 (see payload/payload.ld's ASSERT and payload/src/a3.c's
+a3_verify): the 32 bytes behind the header are a guard, because the BootROM
+hands over with the SP of its own loader and a push below the entry point
+would otherwise overwrite the header CRC word at +0x1c. Both CRCs use zlib's
+polynomial, which is what the on-target bitwise implementation computes.
 
     python tools/a3image.py out/payload.bin -o out/payload.a3 --verify
 """

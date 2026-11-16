@@ -62,7 +62,7 @@ file instead of truncating it, so an interrupted run costs at most one piece.
 
 `flash <zone> -f <file>` is the M-7 verb: one `download:<hex len>`, the bytes,
 then `flash:<zone>`.  It only speaks to the zones the -Write image carries in
-src/fastboot.c's whitelist (`nflasha16_s0` = LBA 2105344, one 512-byte sector),
+payload/src/fastboot.c's whitelist (`nflasha16_s0` = LBA 2105344, one 512-byte sector),
 and it only reads the payload from under the payload directory.  The image
 writes that sector, reads it back through CMD17 and compares -- so OKAY means
 the card returned exactly the bytes that were sent, and FAIL carries
@@ -74,7 +74,7 @@ zone, one 16 KiB piece at a time: `download:<hex len>` then
 written and the rest untouched -- the file on the host stays the authoritative
 copy, and `dump` can prove the two agree afterwards.  The host refuses a size
 that is not a whole number of sectors or does not fit the zone (listed in
-ZONE_BYTES, which mirrors write_zones[] in src/fastboot.c) before it opens the
+ZONE_BYTES, which mirrors write_zones[] in payload/src/fastboot.c) before it opens the
 camera at all.
 
 `selftest` needs no camera: it drives the framing helpers with a fake endpoint
@@ -103,8 +103,8 @@ import usb.util
 VID = 0x18d1
 PID = 0x4ee0
 READ_SIZE = 64           # payload replies are capped at FB_RESPONSE_MAX
-UPLOAD_READ = 16384      # must match UPLOAD_CHUNK in src/fastboot.c
-DOWNLOAD_MAX = 16384     # must match DOWNLOAD_MAX in src/fastboot.c
+UPLOAD_READ = 16384      # must match UPLOAD_CHUNK in payload/src/fastboot.c
+DOWNLOAD_MAX = 16384     # must match DOWNLOAD_MAX in payload/src/fastboot.c
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -146,9 +146,10 @@ def read_reply(ep_in, timeout, on_info=print):
 def clear_halt(ep):
     """Drop ENDPOINT_HALT on one endpoint; True when the request went out.
 
-    The payload answers CLEAR_FEATURE with a bare OK (src/usb.c), so this may
-    not reach the device state at all -- it still releases the host side's halt
-    latch, which is what makes the retry in write_out() worth one attempt.
+    The payload answers CLEAR_FEATURE with a bare OK (payload/src/usb.c), so
+    this may not reach the device state at all -- it still releases the host
+    side's halt latch, which is what makes the retry in write_out() worth one
+    attempt.
     """
     dev = getattr(ep, 'device', None) or getattr(ep, 'dev', None)
     if dev is None:
@@ -232,7 +233,7 @@ def receive_upload(ep_out, ep_in, out, timeout, on_info=print, cmd=b'upload'):
             got += len(data)
             want -= len(data)
 
-    # The stream ends with a 4-byte OKAY (src/fastboot.c: up_stage 3 ->
+    # The stream ends with a 4-byte OKAY (payload/src/fastboot.c: up_stage 3 ->
     # fb_okay("")).  Leaving it unread parks a TRB the controller still owns:
     # 0.5 s later the payload latches a bulk IN deadline, waits out its 1.5 s
     # late window and aborts -- a 2 s tail plus a false dg_hwo=1 in `oem armed`.
@@ -663,7 +664,7 @@ def flash_zone(dev, zone, path, timeout=30000):
     return 0
 
 
-# Zone name -> bytes, mirroring write_zones[] in src/fastboot.c.  Keeping the
+# Zone name -> bytes, mirroring write_zones[] in payload/src/fastboot.c.  Keeping the
 # two lists in step is what turns "the device refused" into "the host never
 # asked": a size that cannot fit is rejected before the camera is opened.
 ZONE_BYTES = {
@@ -684,7 +685,7 @@ def flash_part(dev, zone, path, timeout=30000, chunk=DOWNLOAD_MAX):
     """
     if zone not in ZONE_BYTES:
         raise SystemExit('%s: not a zone this tool knows (%s) -- add it to '
-                         'ZONE_BYTES and src/fastboot.c together'
+                         'ZONE_BYTES and payload/src/fastboot.c together'
                          % (zone, ', '.join(sorted(ZONE_BYTES))))
     src = check_input_path(path)
     data = src.read_bytes()

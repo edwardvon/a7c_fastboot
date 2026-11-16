@@ -1,23 +1,23 @@
 # Build the A7C payload with the Arduino15 ARM toolchain.
 #
-#   .\build.ps1            compile, link, objcopy, wrap into out\payload.a3
-#   .\build.ps1 -Clean     remove out\ first
-#   .\build.ps1 -Selftest  A3-verify-only image -> out\selftest.a3
-#   .\build.ps1 -Probe     read-only four-point probe -> out\probe.a3
-#   .\build.ps1 -Probe2    probe + clkrst3 opening writes -> out\probe2.a3
-#   .\build.ps1 -Probe3    probe + DWC3 FIFO size registers -> out\probe3.a3
-#   .\build.ps1 -Enum      enum diagnostic: report every SETUP packet -> out\enum.a3
-#   .\build.ps1 -Hold      same reports, but against a lamp held ON -> out\hold.a3
-#   .\build.ps1 -Trace     functional image + one-shot progress marks -> out\trace.a3
-#   .\build.ps1 -Beat      connect, then NOP-timed heartbeat only -> out\beat.a3
-#   .\build.ps1 -BeatT     same heartbeat, but timed by the on-chip timer -> out\beatt.a3
-#   .\build.ps1 -Write     functional image + CMD24 write path -> out\payload_w.a3
+#   .\payload\build.ps1            compile, link, objcopy, wrap into out\payload.a3
+#   .\payload\build.ps1 -Clean     remove out\ first
+#   .\payload\build.ps1 -Selftest  A3-verify-only image -> out\selftest.a3
+#   .\payload\build.ps1 -Probe     read-only four-point probe -> out\probe.a3
+#   .\payload\build.ps1 -Probe2    probe + clkrst3 opening writes -> out\probe2.a3
+#   .\payload\build.ps1 -Probe3    probe + DWC3 FIFO size registers -> out\probe3.a3
+#   .\payload\build.ps1 -Enum      enum diagnostic: report every SETUP packet -> out\enum.a3
+#   .\payload\build.ps1 -Hold      same reports, but against a lamp held ON -> out\hold.a3
+#   .\payload\build.ps1 -Trace     functional image + one-shot progress marks -> out\trace.a3
+#   .\payload\build.ps1 -Beat      connect, then NOP-timed heartbeat only -> out\beat.a3
+#   .\payload\build.ps1 -BeatT     same heartbeat, but timed by the on-chip timer -> out\beatt.a3
+#   .\payload\build.ps1 -Write     functional image + CMD24 write path -> out\payload_w.a3
 #
 # -Write is the only build that can program the card, and only the zones named
 # in src\fastboot.c's whitelist (nflasha16_s0 from M-7, nflasha23 from M-8).
 # It is never the default and never payload.a3.
 #
-# Everything is written under a7c_payload\out.
+# Everything is written under out\ at the repository root.
 
 param(
     [switch]$Clean,
@@ -36,7 +36,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $root = $PSScriptRoot
-$out  = Join-Path $root 'out'
+$repo = Split-Path $root -Parent
+$out  = Join-Path $repo 'out'
 $tc   = 'C:\Users\skywa\AppData\Local\Arduino15\packages\rp2040\tools\pqt-gcc\5.0.0-9576866\bin'
 
 $gcc     = Join-Path $tc 'arm-none-eabi-gcc.exe'
@@ -164,7 +165,7 @@ try {
     if ($binLen -gt 65536) { throw "image overflows the 64K ESRAM window" }
 
     Write-Host "[build] wrapping A3 container"
-    python (Join-Path $root 'tools\a3image.py') $bin -o $ap3 --verify
+    python (Join-Path $repo 'tools\a3image.py') $bin -o $ap3 --verify
     if ($LASTEXITCODE -ne 0) { throw "a3image failed ($LASTEXITCODE)" }
 
     & $objdump -d $elf | Out-File -Encoding ascii (Join-Path $out "$name.dis")

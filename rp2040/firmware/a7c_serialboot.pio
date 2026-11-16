@@ -1,0 +1,68 @@
+; A7C (ILCE-7C) boot UART carrier / bit-stream shifter.
+;
+; One PIO instruction cycle = quantum / 2, where the quantum is the A7C bit
+; period (default 56.25 us).  The sketch sets clkdiv = quantum_ns * clk_sys / 2e9.
+;
+; Carrier: 4 cycles low + 4 cycles high = 112.5 us half period.  Every carrier
+; edge is shorter than the bootrom's 631 us "too early" threshold, so the
+; bootrom keeps re-synchronising (0x3003) instead of counting edges.
+;
+; Blob: two extra cycles high, then one cycle per bit (2 cycles per quantum,
+; because `out` + `jmp x--` each take one cycle).
+;
+; Open drain: the pin value stays 0, the program toggles the direction.
+;   pindirs = 1 -> pin driven low  (wire 0)
+;   pindirs = 0 -> pin released    (wire 1, external pull-up)
+; The sketch complements the bit buffer for this build.
+.program a7c_serialboot_od
+
+.wrap_target
+carrier:
+    mov x, status
+    jmp !x, blob
+    set pindirs, 1  [1]
+    mov x, status
+    jmp !x, blob
+    set pindirs, 0  [1]
+.wrap
+
+blob:
+    set pindirs, 0
+    out x, 32
+bits:
+    out pindirs, 1
+    jmp x--, bits
+    irq set 0
+    jmp carrier
+
+; Sniffer: one pin sample per instruction, autopush every 32 samples.
+; The sketch sets clkdiv so that one instruction = the requested sample period.
+; Shift direction is right, so the first sample of each word lands in bit 0.
+.program a7c_sniff
+
+.wrap_target
+    in pins, 1
+.wrap
+
+; Push-pull variant: the pin is a permanent output and the program drives the
+; value directly.  Same waveform timing, bit buffer is not complemented.
+.program a7c_serialboot_pp
+
+.wrap_target
+carrier:
+    mov x, status
+    jmp !x, blob
+    set pins, 1     [1]
+    mov x, status
+    jmp !x, blob
+    set pins, 0     [1]
+.wrap
+
+blob:
+    set pins, 0
+    out x, 32
+bits:
+    out pins, 1
+    jmp x--, bits
+    irq set 0
+    jmp carrier
